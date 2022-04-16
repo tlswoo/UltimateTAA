@@ -45,6 +45,7 @@ ExportedObj/
 *.VC.db
 .vscode/
 UserSettings/
+my_information.txt
 
 # Unity3D generated meta files
 *.pidb.meta
