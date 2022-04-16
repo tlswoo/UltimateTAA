@@ -62,7 +62,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 		public GameCameraRenderer(Camera camera) : base(camera) {
 			cameraType = AdvancedCameraType.Game;
 			_rendererDesc = "Render Game (" + camera.name + ")";
-			camera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
+			// camera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
 			InitBuffers();
 			InitComputeBuffers();
 		}
@@ -142,10 +142,13 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_context.SetupCameraProperties(camera);
 
 			var transform = camera.transform;
+			
+			var cameraViewMatrix = camera.worldToCameraMatrix;
+			
 			_cameraPosWS = transform.position;
-			_cameraFwdWS = transform.forward;
-			_cameraUpWS = transform.up;
-			_cameraRightWS = transform.right;
+			_cameraFwdWS = cameraViewMatrix.GetViewForward();
+			_cameraUpWS = cameraViewMatrix.GetViewUp();
+			_cameraRightWS = cameraViewMatrix.GetViewRight();
 
 			var screenSize = Vector4.one;
 			screenSize.x = InternalRes.x;
@@ -176,6 +179,8 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_MATRIX_NONJITTERED_I_VP, _invNonJitteredMatrixVP);
 			
 			var farHalfFovTan = _farPlane * _verticalFovTan;
+			
+			_prevFrustumCornersWS = _frustumCornersWS;
 
 			_frustumCornersWS = new Matrix4x4();
 			
@@ -189,7 +194,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			// var bottomRight = fwdDir - upDir * 3f + rightDir * 3f;
 
 			var zBufferParams = new float4((_farPlane - _nearPlane) / _nearPlane,  1f, (_farPlane - _nearPlane) / (_nearPlane * _farPlane), 1f / _farPlane);
-			
+
 			_frustumCornersWS.SetRow(0, new float4(topLeft, .0f));
 			_frustumCornersWS.SetRow(1, new float4(bottomLeft, .0f));
 			_frustumCornersWS.SetRow(2, new float4(topRight, .0f));
@@ -200,6 +205,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 				cameraFwdWS = new float4(_cameraFwdWS, 1.0f),
 				screenSize = screenSize,
 				frustumCornersWS = _frustumCornersWS,
+				prevFrustumCornersWS = _prevFrustumCornersWS,
 				_rtHandleProps = rtProps
 			};
 			

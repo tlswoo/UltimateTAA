@@ -22,7 +22,17 @@ namespace AdvancedRenderPipeline.Runtime {
 		public float4 cameraFwdWS;
 		public float4 screenSize;
 		public float4x4 frustumCornersWS;
+		public float4x4 prevFrustumCornersWS;
 		public PackedRTHandleProperties _rtHandleProps;
+	}
+
+	[Serializable]
+	public struct DiffuseProbeParams {
+		public float4 _DiffuseProbeParams0;
+		public float4 _DiffuseProbeParams1;
+		public float4 _DiffuseProbeParams2;
+		public int4 _DiffuseProbeParams3;
+		public float4 _DiffuseProbeParams4;
 	}
 
 	[Serializable]

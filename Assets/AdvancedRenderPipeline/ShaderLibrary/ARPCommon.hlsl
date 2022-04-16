@@ -62,10 +62,19 @@ CBUFFER_START(CameraData)
     float4 _CameraFwdWS;
     float4 _ScreenSize; // { w, h, 1 / w, 1 / h }
     float4x4 _FrustumCornersWS; // row 0: topLeft, row 1: bottomLeft, row 2: topRight, row 3: float4 _ZBufferParams { (f - n) / n, 1, (f - n) / n * f, 1 / f }
+    float4x4 _PrevFrustumCornersWS; // same as above
     // RTHandleProperties _RTHandleProps;
     int4 _ViewportSize;
     int4 _RTSize;
     float4 _RTHandleScale;
+CBUFFER_END
+
+CBUFFER_START(DiffuseProbeParams)
+    float4 _DiffuseProbeParams0; // xyz: volume center, w: view distance
+    float4 _DiffuseProbeParams1; // xyz: dimensions, w: probe depth sharpness
+    float4 _DiffuseProbeParams2; // xyz: max intervals, w: grid diagonal length
+    int4 _DiffuseProbeParams3; // x: probe gbuffer size, y: probe vbuffer size, z: offline cubemap size
+    float4 _DiffuseProbeParams4; // xyz: min position, w: probe irradiance gamma
 CBUFFER_END
 
 #ifndef DOTS_INSTANCING_ON // UnityPerDraw cbuffer doesn't exist with hybrid renderer
@@ -261,11 +270,25 @@ float pow8(float b) {
     return pow4 * pow4;
 }
 
+float SignNotZero(float n) {
+    return n >= .0f ? 1.0f : -1.0f;
+}
+
+float2 SignNotZero(float2 n) {
+    return float2(SignNotZero(n.x), SignNotZero(n.y));
+}
+
+float3 SignNotZero(float3 n) {
+    return float3(SignNotZero(n.x), SignNotZero(n.y), SignNotZero(n.z));
+}
+
+float4 SignNotZero(float4 n) {
+    return float4(SignNotZero(n.x), SignNotZero(n.y), SignNotZero(n.z), SignNotZero(n.w));
+}
+
 //////////////////////////////////////////
 // Noise Functions                      //
 //////////////////////////////////////////
-
-
 
 // xy should be a integer position
 float PseudoRandom(float2 xy) {
@@ -368,6 +391,18 @@ float BlueNoise1024(uint2 coord) {
     return LOAD_TEXTURE2D(_BlueNoise1024, coord & 0x3FF).r;
 }
 
+int GetDiffuseProbeGBufferSize() {
+    return _DiffuseProbeParams3.x;
+}
+
+int GetDiffuseProbeVBufferSize() {
+    return _DiffuseProbeParams3.y;
+}
+
+int GetDiffuseProbeVBufferSizeNoBorder() {
+    return _DiffuseProbeParams3.y - 2;
+}
+
 /*
 // Convert from Clip space (-1..1) to NDC 0..1 space.
 // Note it doesn't mean we don't have negative value, we store negative or positive offset in NDC space.
@@ -404,6 +439,16 @@ float3 DecodeNormalComplex(float2 N) {
     // return UnpackNormalOctRectEncode(N * 2.0f - 1.0f);
 }
 
+// Convert to (-1, 1)
+float2 GetNormalizedOctCoords(uint2 coords, int size) {
+    float2 octCoords = float2(coords.x, coords.y);
+    octCoords += float2(.5f, .5f);
+    octCoords /= float(size);
+    octCoords *= 2.0f;
+    octCoords -= float2(1.0f, 1.0f);
+    return octCoords;
+}
+
 float4 VertexIDToPosCS(uint vertexID) {
     return float4(
         vertexID <= 1 ? -1.0f : 3.0f,
@@ -424,6 +469,10 @@ float4 VertexIDToFrustumCorners(uint vertexID) {
 
 float4 GetZBufferParams() {
     return _FrustumCornersWS[3];
+}
+
+float4 GetPrevZBufferParams() {
+    return _PrevFrustumCornersWS[3];
 }
 
 float SampleDepth(float2 uv) {
@@ -454,6 +503,14 @@ float4 DepthToWorldPos(float depth, float2 uv) {
     worldPosAccurate /= worldPosAccurate.w;
     worldPosAccurate.w = 1.0f;
     return worldPosAccurate;
+}
+
+float DepthToLinearEyeSpace(float depth) {
+    return LinearEyeDepth(depth, GetZBufferParams());
+}
+
+float PrevDepthToLinearEyeSpace(float depth) {
+    return LinearEyeDepth(depth, GetPrevZBufferParams());
 }
 
 float4 TransformObjectToWorldTangent(float4 tangentOS) {
@@ -580,7 +637,6 @@ float3 F_Schlick(in float3 f0, in float u) {
 
 float3 F_SchlickRoughness(float3 f0, float u, float linearRoughness) {
     float r = 1.0f - linearRoughness;
-    // r = 1.0f;
     return f0 + (max(float3(r, r, r), f0) - f0) * pow5(saturate(1.0f - u));
 }
 
@@ -643,7 +699,7 @@ float D_GGX(float NdotH, float alphaG2) {
     const float f = (alphaG2 - 1.0f) * NdotH * NdotH + 1.0f;
     // const float f = (NdotH * alphaG2 - NdotH) * NdotH + 1;
     float f_sqr = f * f;
-    f_sqr = f_sqr == .0f ? .0001f : f_sqr;
+    f_sqr = f_sqr == .0f ? .00001f : f_sqr;
     return alphaG2 / f_sqr;
 }
 
@@ -734,6 +790,7 @@ float3 CalculateFr(float NdotV, float NdotL, float NdotH, float LdotH, float alp
 }
 
 float3 CalculateFrMultiScatter(float NdotV, float NdotL, float NdotH, float LdotH, float alphaG2, float3 f0, float3 energyCompensation) {
+    // return energyCompensation - 1.0f;
     return CalculateFr(NdotV, NdotL, NdotH, LdotH, alphaG2, f0) * energyCompensation;
 }
 
@@ -846,7 +903,6 @@ float2 PrecomputeSpecularL_DFG(float3 V, float NdotV, float linearRoughness) {
             float G = IBL_G_SmithGGX(NdotV, NdotL, alphaG2);
             float Gv = G * VdotH / NdotH;
             float Fc = pow5(1.0f - VdotH);
-            // r.x += Gv * (1.0f - Fc);
             r.x += Gv;
             r.y += Gv * Fc;
         }

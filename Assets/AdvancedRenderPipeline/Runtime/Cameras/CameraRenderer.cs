@@ -57,6 +57,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
         protected float3 _cameraUpWS;
         protected float3 _cameraRightWS;
         protected Matrix4x4 _frustumCornersWS;
+        protected Matrix4x4 _prevFrustumCornersWS;
         protected Vector2[] _jitterPatterns = new Vector2[8];
         protected Vector2 _currJitter;
         protected Matrix4x4 _nonjitteredMatrixVP;
@@ -362,9 +363,17 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 #if UNITY_EDITOR
                 case AdvancedCameraType.SceneView: return new SceneViewCameraRenderer(camera);
                 case AdvancedCameraType.Preview: return new PreviewCameraRenderer(camera);
+                case AdvancedCameraType.DiffuseProbe: return new DiffuseProbeCameraRenderer(camera);
 #endif
                 default: throw new InvalidOperationException("Does not support camera type: " + type);
             }
+        }
+
+        public static AdvancedCameraType GetCameraType(Camera camera) {
+#if UNITY_EDITOR
+            if (camera.TryGetComponent<ARPCameraAdditionalData>(out var additionData)) return additionData.cameraType;
+#endif
+            return DefaultToAdvancedCameraType(camera.cameraType);
         }
 
         public static AdvancedCameraType DefaultToAdvancedCameraType(CameraType cameraType) {
@@ -386,6 +395,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
         SceneView = 2,
         Preview = 4,
         VR = 8,
-        Reflection = 16
+        Reflection = 16,
+        DiffuseProbe = 32
     }
 }

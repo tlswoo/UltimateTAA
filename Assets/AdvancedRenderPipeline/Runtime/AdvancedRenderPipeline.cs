@@ -28,8 +28,9 @@ namespace AdvancedRenderPipeline.Runtime {
 			}
 
 			foreach (var pair in tempCameras) {
+				var cam = pair.Value;
 				cameraRenderers.Remove(pair.Key);
-				pair.Value.Dispose();
+				cam.Dispose();
 			}
 			
 			tempCameras.Clear();
@@ -46,7 +47,7 @@ namespace AdvancedRenderPipeline.Runtime {
 		}
 
 		public static bool RegisterCamera(Camera camera) =>
-			RegisterCamera(camera, CameraRenderer.DefaultToAdvancedCameraType(camera.cameraType));
+			RegisterCamera(camera, CameraRenderer.GetCameraType(camera));
 
 		public static bool RegisterCamera(Camera camera, AdvancedCameraType type) {
 			if (cameraRenderers.ContainsKey(camera)) return false;
@@ -55,11 +56,8 @@ namespace AdvancedRenderPipeline.Runtime {
 
 		}
 
-		public static bool AddIndependentCommandBufferRequest(CommandBuffer request, Action onSubmit) {
-			return false;
-			if (instance == null) return false;
-			independentCMDRequests.Add(request, onSubmit);
-			return true;
+		protected override void ProcessRenderRequests(ScriptableRenderContext context, Camera camera, List<Camera.RenderRequest> renderRequests) {
+			base.ProcessRenderRequests(context, camera, renderRequests);
 		}
 
 		private static void ExecuteIndependentCommandBufferRequest(ScriptableRenderContext context) {
@@ -79,6 +77,12 @@ namespace AdvancedRenderPipeline.Runtime {
 
 		#endregion
 
+		#region Pipeline Processors
+
+		internal DiffuseProbeProcessor _diffuseProbeProcessor = new();
+
+		#endregion
+
 		public AdvancedRenderPipeline(AdvancedRenderPipelineSettings settings) {
 			instance = this;
 			AdvancedRenderPipeline.settings = settings;
@@ -86,8 +90,6 @@ namespace AdvancedRenderPipeline.Runtime {
 			GraphicsSettings.lightsUseLinearIntensity = true;
 			GraphicsSettings.useScriptableRenderPipelineBatching = settings.enableSRPBatching;
 		}
-
-		private double tempA, tempB;
 
 		protected override void Render(ScriptableRenderContext context, Camera[] cameras) {
 			
@@ -97,13 +99,18 @@ namespace AdvancedRenderPipeline.Runtime {
 
 			var screenWidth = Screen.width;
 			var screenHeight = Screen.height;
-			
+
 			BeginFrameRendering(context, cameras);
+			
+			SetupPipeline(context);
 
 			foreach (var camera in cameras) {
+				var pixelWidth = camera.pixelWidth;
+				var pixelHeight = camera.pixelHeight;
+				
 				var cameraRenderer = GetCameraRenderer(camera);
 				cameraRenderer.PreUpdate();
-				cameraRenderer.SetResolutionAndRatio(screenWidth, screenHeight, 1f, 1f);
+				cameraRenderer.SetResolutionAndRatio(pixelWidth, pixelHeight, 1f, 1f);
 				
 				BeginCameraRendering(context, camera);
 				
@@ -117,20 +124,34 @@ namespace AdvancedRenderPipeline.Runtime {
 			EndFrameRendering(context, cameras);
 		}
 
+		internal void SetupPipeline(ScriptableRenderContext context) {
+			_diffuseProbeProcessor.Process(context);
+		}
+
+		internal CameraRenderer GetCameraRenderer(Camera camera) {
+			var cameraType = CameraRenderer.GetCameraType(camera);
+			// Debug.Log(camera.name + " " + cameraType);
+			if (!cameraRenderers.TryGetValue(camera, out var renderer)) {
+				renderer = CameraRenderer.CreateCameraRenderer(camera, cameraType);
+				cameraRenderers.Add(camera, renderer);
+			} else {
+				if (cameraType != renderer.cameraType) {
+					var oldRenderer = renderer;
+					renderer = CameraRenderer.CreateCameraRenderer(camera, cameraType);
+					cameraRenderers[camera] = renderer;
+					oldRenderer.Dispose();
+				}
+			}
+
+			return renderer;
+		}
+		
 		protected override void Dispose(bool disposing) {
 			foreach (var renderer in cameraRenderers.Values) renderer.Dispose();
 			cameraRenderers.Clear();
 			tempCameras.Clear();
+			_diffuseProbeProcessor.Dispose();
 			base.Dispose(disposing);
-		}
-
-		internal CameraRenderer GetCameraRenderer(Camera camera) {
-			if (!cameraRenderers.TryGetValue(camera, out var renderer)) {
-				renderer = CameraRenderer.CreateCameraRenderer(camera, CameraRenderer.DefaultToAdvancedCameraType(camera.cameraType));
-				cameraRenderers.Add(camera, renderer);
-			}
-
-			return renderer;
 		}
 	}
 }
