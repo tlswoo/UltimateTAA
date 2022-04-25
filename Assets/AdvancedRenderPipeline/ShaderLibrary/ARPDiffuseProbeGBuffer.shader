@@ -86,6 +86,10 @@ Shader "Hidden/ARPDiffuseProbeGBuffer" {
                 
                 ARPSurfVertexSetup(output, input, albedoST);
 
+                // float4 posCS = output.posCS;
+                // posCS.x = -posCS.x;
+                //output.posCS = posCS;
+
                 return output;
             }
 

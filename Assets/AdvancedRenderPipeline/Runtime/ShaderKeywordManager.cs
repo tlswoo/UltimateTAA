@@ -39,11 +39,11 @@ namespace AdvancedRenderPipeline.Runtime {
 		public static readonly int PREINTEGRATED_DGF_LUT = Shader.PropertyToID("_PreintegratedDGFLut");
 		public static readonly int PREINTEGRATED_D_LUT = Shader.PropertyToID("_PreintegratedDLut");
 		public static readonly int PREINTEGRATED_GF_LUT = Shader.PropertyToID("_PreintegratedGFLut");
-		public static readonly int GLOBAL_ENV_MAP = Shader.PropertyToID("_GlobalEnvMap");
 		public static readonly int GLOBAL_ENV_MAP_SPECULAR = Shader.PropertyToID("_GlobalEnvMapSpecular");
 		public static readonly int GLOBAL_ENV_MAP_DIFFUSE = Shader.PropertyToID("_GlobalEnvMapDiffuse");
 		public static readonly int GLOBAL_ENV_MAP_ROTATION = Shader.PropertyToID("_GlobalEnvMapRotation");
 		public static readonly int SKYBOX_MIP_LEVEL = Shader.PropertyToID("_SkyboxMipLevel");
+		public static readonly int SKYBOX_INTENSITY = Shader.PropertyToID("_SkyboxIntensity");
 
 		#endregion
 
@@ -60,9 +60,17 @@ namespace AdvancedRenderPipeline.Runtime {
 		public static readonly int DIFFUSE_PROBE_GBUFFER_1 = Shader.PropertyToID("_DiffuseProbeGBuffer1");
 		public static readonly int DIFFUSE_PROBE_GBUFFER_2 = Shader.PropertyToID("_DiffuseProbeGBuffer2");
 		public static readonly int DIFFUSE_PROBE_VBUFFER_0 = Shader.PropertyToID("_DiffuseProbeVBuffer0");
-		public static readonly int DIFFUSE_PROBE_GBUFFER_ARRAY_0 = Shader.PropertyToID("_DiffuseProbeGBufferArray0");
-		public static readonly int DIFFUSE_PROBE_GBUFFER_ARRAY_1 = Shader.PropertyToID("_DiffuseProbeGBufferArray1");
-		public static readonly int DIFFUSE_PROBE_GBUFFER_ARRAY_2 = Shader.PropertyToID("_DiffuseProbeGBufferArray2");
+		public static readonly int PREV_DIFFUSE_PROBE_IRRADIANCE_ARRAY = Shader.PropertyToID("_PrevDiffuseProbeIrradianceArr");
+		public static readonly int DIFFUSE_PROBE_IRRADIANCE_ARRAY = Shader.PropertyToID("_DiffuseProbeIrradianceArr");
+		public static readonly int DIFFUSE_PROBE_RADIANCE_ARRAY = Shader.PropertyToID("_DiffuseProbeRadianceArr");
+		public static readonly int DIFFUSE_PROBE_GBUFFER_ARRAY_0 = Shader.PropertyToID("_DiffuseProbeGBufferArr0");
+		public static readonly int DIFFUSE_PROBE_GBUFFER_ARRAY_1 = Shader.PropertyToID("_DiffuseProbeGBufferArr1");
+		public static readonly int DIFFUSE_PROBE_GBUFFER_ARRAY_2 = Shader.PropertyToID("_DiffuseProbeGBufferArr2");
+		public static readonly int DIFFUSE_PROBE_VBUFFER_ARRAY_0 = Shader.PropertyToID("_DiffuseProbeVBufferArr0");
+		
+		// Only used in compute shaders
+		public static readonly int RADIANCE_ARRAY = Shader.PropertyToID("_RadianceArr");
+		public static readonly int IRRADIANCE_ARRAY = Shader.PropertyToID("_IrradianceArr");
 
 		#endregion
 
@@ -134,6 +142,9 @@ namespace AdvancedRenderPipeline.Runtime {
 		public static readonly string DIFFUSE_PROBE_GBUFFER_PREFILTER = "GBufferPrefilter";
 		public static readonly string DIFFUSE_PROBE_VBUFFER_PREFILTER = "VBufferPrefilter";
 		public static readonly string DIFFUSE_PROBE_VBUFFER_PADDING = "VBufferPadding";
+		public static readonly string DIFFUSE_PROBE_RADIANCE_UPDATE = "RadianceUpdate";
+		public static readonly string DIFFUSE_PROBE_IRRADIANCE_PREFILTER = "IrradiancePrefilter";
+		public static readonly string DIFFUSE_PROBE_IRRADIANCE_PADDING = "IrradiancePadding";
 
 		#endregion
 

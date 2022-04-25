@@ -81,7 +81,6 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			beforeCull?.Invoke();
 
 			Cull();
-			SetupSkybox();
 
 			beforeFirstPass?.Invoke();
 			
@@ -167,11 +166,15 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			*/
 
 			var viewMatrix = camera.worldToCameraMatrix;
-			_matrixVP = GL.GetGPUProjectionMatrix(camera.projectionMatrix, false) * viewMatrix;
+			var projectionMatrix = camera.projectionMatrix;
+			// projectionMatrix *= Matrix4x4.Scale(new Vector3(-1, 1, 1));
+			// camera.projectionMatrix = projectionMatrix;
+			_matrixVP = GL.GetGPUProjectionMatrix(projectionMatrix, false) * viewMatrix;
 			_invMatrixVP = _matrixVP.inverse;
 			_nonjitteredMatrixVP = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, false) * viewMatrix;
 			_invNonJitteredMatrixVP = _nonjitteredMatrixVP.inverse;
 
+			_cmd.SetInvertCulling(false);
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_MATRIX_I_VP, _invMatrixVP);
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_PREV_MATRIX_VP, IsOnFirstFrame ? _nonjitteredMatrixVP : _prevMatrixVP);
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_PREV_MATRIX_I_VP, IsOnFirstFrame ? _invNonJitteredMatrixVP : _prevInvMatrixVP);
@@ -214,25 +217,11 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_cameraDataBuffer.SetData(_cameraData);
 			
 			_cmd.SetGlobalConstantBuffer(_cameraDataBuffer, ShaderKeywordManager.CAMERA_DATA, 0, sizeof(CameraData));
-			// _cmd.SetGlobalBuffer(ShaderKeywordManager.CAMERA_DATA, _cameraDataBuffer);
-
-			if (IsOnFirstFrame) {
-				_cmd.SetGlobalTexture(ShaderKeywordManager.BLUE_NOISE_16, settings.blueNoise16);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.BLUE_NOISE_64, settings.blueNoise64);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.BLUE_NOISE_256, settings.blueNoise256);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.BLUE_NOISE_512, settings.blueNoise512);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.BLUE_NOISE_1024, settings.blueNoise1024);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREINTEGRATED_DGF_LUT, settings.iblLut);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREINTEGRATED_D_LUT, settings.diffuseIBLLut);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREINTEGRATED_GF_LUT, settings.specularIBLLut);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.GLOBAL_ENV_MAP_SPECULAR, settings.globalEnvMapSpecular);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.GLOBAL_ENV_MAP_DIFFUSE, settings.globalEnvMapDiffuse);
-			}
 
 			ExecuteCommand();
 		}
 
-		public void Cull() {
+		internal void Cull() {
 			if (!camera.TryGetCullingParameters(out var cullingParameters)) {
 				Debug.Log("Culling Failed for " + _rendererDesc);
 				return;
@@ -241,16 +230,16 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_cullingResults = _context.Cull(ref cullingParameters);
 		}
 
-		public void DrawDepthPrepass() {
+		internal void DrawDepthPrepass() {
 			DrawOccluderDepthPrepass();
 			DrawRestDepthPrepass();
 		}
 
-		public void DrawOccluderDepthPrepass() {
+		internal void DrawOccluderDepthPrepass() {
 			
 		}
 
-		public void DrawRestDepthPrepass() {
+		internal void DrawRestDepthPrepass() {
 			SetRenderTarget(_velocityTex, _depthTex);
 			ClearRenderTarget(true, true);
 			
@@ -263,12 +252,12 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_context.DrawRenderers(_cullingResults, ref drawSettings, ref filterSettings);
 		}
 
-		public void DrawVelocityPass() {
+		internal void DrawVelocityPass() {
 			DrawDynamicVelocityPass();
 			DrawStaticVelocityPass();
 		}
 
-		public void DrawDynamicVelocityPass() {
+		internal void DrawDynamicVelocityPass() {
 			// Assume RT is correctly set by the previous step
 
 			var sortSettings = new SortingSettings(camera) { criteria = SortingCriteria.OptimizeStateChanges };
@@ -279,30 +268,25 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_context.DrawRenderers(_cullingResults, ref drawSettings, ref filterSettings);
 		}
 
-		public void DrawStaticVelocityPass() {
+		internal void DrawStaticVelocityPass() {
 			_cmd.FullScreenPass(MaterialManager.CameraMotionMat, MaterialManager.CAMERA_MOTION_VECTORS_PASS);
 			ExecuteCommand();
 		}
 
-		public void SetupSkybox() {
-			_cmd.SetGlobalFloat(ShaderKeywordManager.GLOBAL_ENV_MAP_ROTATION, settings.globalEnvMapRotation);
-			_cmd.SetGlobalFloat(ShaderKeywordManager.SKYBOX_MIP_LEVEL, settings.skyboxMipLevel);
-		}
-		
-		public void SetupLights() {
+		internal void SetupLights() {
 			LightManager.UpdateLight(_cullingResults);
-			_mainLights[0] = LightManager.mainLightData;
+			_mainLights[0] = LightManager.MainLightData;
 			_mainLightBuffer.SetData(_mainLights, 0, 0, 1);
 			_cmd.SetGlobalConstantBuffer(_mainLightBuffer, ShaderKeywordManager.MAIN_LIGHT_DATA, 0, sizeof(DirectionalLight));
 			// _cmd.SetGlobalBuffer(ShaderKeywordManager.MAIN_LIGHT_DATA, _mainLightBuffer);
 			ExecuteCommand();
 		}
 
-		public void DrawShadowPass() {
+		internal void DrawShadowPass() {
 			
 		}
 
-		public void DrawOpaqueLightingPass() {
+		internal void DrawOpaqueLightingPass() {
 			var clearColor = camera.clearFlags == CameraClearFlags.Color ? camera.backgroundColor.linear : Color.black;
 			clearColor = Color.clear; // MRT needs to be cleared with 0 anyway
 
@@ -323,25 +307,25 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_context.DrawRenderers(_cullingResults, ref drawSettings, ref filterSettings);
 		}
 
-		public void DrawTransparentLightingPass() {
+		internal void DrawTransparentLightingPass() {
 			
 		}
 
-		public void DrawSkybox() {
+		internal void DrawSkybox() {
 			_context.DrawSkybox(camera);
 		}
 
-		public void DrawSpecularLightingPass() {
+		internal void DrawSpecularLightingPass() {
 			ComputeScreenSpaceReflectionPass();
 			ComputeSpecularIBLPass();
 		}
 		
-		public void ComputeScreenSpaceReflectionPass() {
+		internal void ComputeScreenSpaceReflectionPass() {
 			_cmd.FullScreenPass(_screenSpaceReflection, MaterialManager.IndirectSpecularMat, MaterialManager.SCREEN_SPACE_REFLECTION_PASS);
 			ExecuteCommand();
 		}
 
-		public void ComputeSpecularIBLPass() {
+		internal void ComputeSpecularIBLPass() {
 			_cmd.SetGlobalTexture(ShaderKeywordManager.DEPTH_TEXTURE, _depthTex);
 			_cmd.SetGlobalTexture(ShaderKeywordManager.GBUFFER_1_TEXTURE, _gbuffer1Tex);
 			_cmd.SetGlobalTexture(ShaderKeywordManager.GBUFFER_2_TEXTURE, _gbuffer2Tex);
@@ -351,41 +335,41 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			ExecuteCommand();
 		}
 
-		public void IntegrateOpaqueLightingPass() {
+		internal void IntegrateOpaqueLightingPass() {
 			_cmd.SetGlobalTexture(ShaderKeywordManager.RAW_COLOR_TEXTURE, _rawColorTex);
 			_cmd.SetGlobalTexture(ShaderKeywordManager.INDIRECT_SPECULAR, _indirectSpecular);
 			_cmd.FullScreenPass(_colorTex, MaterialManager.IntegrateOpaqueLightingMat, MaterialManager.INTEGRATE_OPAQUE_LIGHTING_PASS);
 			ExecuteCommand();
 		}
 
-		public void DrawPostFXPass() {
+		internal void DrawPostFXPass() {
 			StopNaNPropagationPass();
 			ResolveTAAPass();
 			TonemapPass();
 		}
 
-		public void StopNaNPropagationPass() {
+		internal void StopNaNPropagationPass() {
 			if (!settings.stopNaNPropagation) return;
 			_cmd.Blit(_colorTex, _taaColorTex, MaterialManager.TonemappingMat, MaterialManager.STOP_NAN_PROPAGATION_PASS);
 			_cmd.Blit(_taaColorTex, _colorTex);
 			ExecuteCommand();
 		}
 
-		public void ResolveTAAPass() {
+		internal void ResolveTAAPass() {
+			var enableProjection = -1f;
+			if (!IsOnFirstFrame && settings.taaSettings.enabled && _enableTaa) enableProjection = 1f;
 
-			if (!IsOnFirstFrame && settings.taaSettings.enabled && _enableTaa) {
-				MaterialManager.TaaMat.SetFloat(ShaderKeywordManager.ENABLE_REPROJECTION, 1f);
-				MaterialManager.TaaMat.SetVector(ShaderKeywordManager.TAA_PARAMS_0, settings.taaSettings.TaaParams0);
-				MaterialManager.TaaMat.SetVector(ShaderKeywordManager.TAA_PARAMS_1, settings.taaSettings.TaaParams1);
-				MaterialManager.TaaMat.SetVector(ShaderKeywordManager.TAA_PARAMS_2, settings.taaSettings.TaaParams2);
+			MaterialManager.TaaMat.SetFloat(ShaderKeywordManager.ENABLE_REPROJECTION, enableProjection);
+			MaterialManager.TaaMat.SetVector(ShaderKeywordManager.TAA_PARAMS_0, settings.taaSettings.TaaParams0);
+			MaterialManager.TaaMat.SetVector(ShaderKeywordManager.TAA_PARAMS_1, settings.taaSettings.TaaParams1);
+			MaterialManager.TaaMat.SetVector(ShaderKeywordManager.TAA_PARAMS_2, settings.taaSettings.TaaParams2);
 				
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_TAA_COLOR_TEXTURE, _prevTaaColorTex);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_DEPTH_TEXTURE, _prevDepthTex);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.STENCIL_TEXTURE, _depthTex, RenderTextureSubElement.Stencil);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_STENCIL_TEXTURE, _prevDepthTex, RenderTextureSubElement.Stencil);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.VELOCITY_TEXTURE, _velocityTex);
-				_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_VELOCITY_TEXTURE, _prevVelocityTex);
-			} else MaterialManager.TaaMat.SetFloat(ShaderKeywordManager.ENABLE_REPROJECTION, -1f);
+			_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_TAA_COLOR_TEXTURE, _prevTaaColorTex);
+			_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_DEPTH_TEXTURE, _prevDepthTex);
+			_cmd.SetGlobalTexture(ShaderKeywordManager.STENCIL_TEXTURE, _depthTex, RenderTextureSubElement.Stencil);
+			_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_STENCIL_TEXTURE, _prevDepthTex, RenderTextureSubElement.Stencil);
+			_cmd.SetGlobalTexture(ShaderKeywordManager.VELOCITY_TEXTURE, _velocityTex);
+			_cmd.SetGlobalTexture(ShaderKeywordManager.PREV_VELOCITY_TEXTURE, _prevVelocityTex);
 
 			_cmd.Blit(_colorTex, _taaColorTex, MaterialManager.TaaMat, MaterialManager.TEMPORAL_ANTI_ALIASING_PASS);
 			_cmd.Blit(_taaColorTex, _hdrColorTex, MaterialManager.TonemappingMat, MaterialManager.FAST_INVERT_TONEMAPPING_PASS);
@@ -393,7 +377,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			ExecuteCommand();
 		}
 
-		public void TonemapPass() {
+		internal void TonemapPass() {
 
 			var colorGradeParams = new Vector4(
 				Mathf.Pow(2f, settings.colorSettings.postExposure), 
@@ -408,7 +392,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			ExecuteCommand();
 		}
 
-		public void FinalBlit() {
+		internal void FinalBlit() {
 			RTHandle src = _displayTex;
 #if !UNITY_EDITOR
 			_cmd.Blit(src, BuiltinRenderTextureType.CameraTarget);
@@ -501,7 +485,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			}
 		}
 
-		public void InitBuffers() {
+		internal void InitBuffers() {
 			_historyBuffers.AllocBuffer(ShaderKeywordManager.RAW_COLOR_TEXTURE,
 				(system, i) => system.Alloc(size => InternalRes, colorFormat: GraphicsFormat.R16G16B16A16_SFloat,
 					filterMode: FilterMode.Bilinear, name: "RawColorTex"), 1);
@@ -536,14 +520,14 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 				(system, i) => system.Alloc(size => InternalRes, colorFormat: GraphicsFormat.B10G11R11_UFloatPack32, name: "IndirectSpecular"), 1);
 		}
 
-		public void ResetBufferSize() {
+		internal void ResetBufferSize() {
 			// Debug.Log("Reset!");
 			// Debug.Log(Time.frameCount + ", " + _frameNum + " " + camera.name + " Reset to " + OutputRes);
 			// _historyBuffers.SwapAndSetReferenceSize(OutputRes.x, OutputRes.y);
 			_historyBuffers.ResetReferenceSize(OutputRes.x, OutputRes.y);
 		}
 
-		public void GetBuffers() {
+		internal void GetBuffers() {
 			
 			_historyBuffers.SwapAndSetReferenceSize(OutputRes.x, OutputRes.y);
 			
@@ -567,9 +551,9 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_prevScreenSpaceReflection = _historyBuffers.GetFrameRT(ShaderKeywordManager.SCREEN_SPACE_REFLECTION, 1);
 		}
 
-		public void ReleaseBuffers() { }
+		internal void ReleaseBuffers() { }
 
-		public void InitComputeBuffers() {
+		internal void InitComputeBuffers() {
 			_cameraData = new CameraData[1];
 			_cameraDataBuffer = new ComputeBuffer(1, sizeof(CameraData), ComputeBufferType.Constant);
 			
@@ -577,7 +561,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 			_mainLightBuffer = new ComputeBuffer(1, sizeof(DirectionalLight), ComputeBufferType.Constant);
 		}
 
-		public void ReleaseComputeBuffers() {
+		internal void ReleaseComputeBuffers() {
 			_cameraDataBuffer.Dispose();
 			_mainLightBuffer.Dispose();
 		}
@@ -588,6 +572,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 				_historyBuffers.Dispose();
 			}
 			
+			ReleaseBuffers();
 			ReleaseComputeBuffers();
 			
 			base.Dispose();

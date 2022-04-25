@@ -73,8 +73,9 @@ CBUFFER_START(DiffuseProbeParams)
     float4 _DiffuseProbeParams0; // xyz: volume center, w: view distance
     float4 _DiffuseProbeParams1; // xyz: dimensions, w: probe depth sharpness
     float4 _DiffuseProbeParams2; // xyz: max intervals, w: grid diagonal length
-    int4 _DiffuseProbeParams3; // x: probe gbuffer size, y: probe vbuffer size, z: offline cubemap size
+    int4 _DiffuseProbeParams3; // x: probe gbuffer size, y: probe vbuffer size, z: offline cubemap size, w: enabled or not (disabled = 0, enabled = 1)
     float4 _DiffuseProbeParams4; // xyz: min position, w: probe irradiance gamma
+    float4 _DiffuseProbeParams5; // xyz: max position
 CBUFFER_END
 
 #ifndef DOTS_INSTANCING_ON // UnityPerDraw cbuffer doesn't exist with hybrid renderer
@@ -149,6 +150,7 @@ static float _AlphaCutOff;
 
 float _GlobalEnvMapRotation;
 float _SkyboxMipLevel;
+float _SkyboxIntensity;
 
 //////////////////////////////////////////
 // Built-in Textures and Samplers       //
@@ -221,6 +223,14 @@ TEXTURECUBE(_GlobalEnvMapSpecular);
 SAMPLER(sampler_GlobalEnvMapSpecular);
 TEXTURECUBE(_GlobalEnvMapDiffuse);
 SAMPLER(sampler_GlobalEnvMapDiffuse);
+
+TEXTURE2D_ARRAY(_PrevDiffuseProbeIrradianceArr);
+TEXTURE2D_ARRAY(_DiffuseProbeIrradianceArr);
+TEXTURE2D_ARRAY(_DiffuseProbeRadianceArr);
+TEXTURE2D_ARRAY(_DiffuseProbeGBufferArr0);
+TEXTURE2D_ARRAY(_DiffuseProbeGBufferArr1);
+TEXTURE2D_ARRAY(_DiffuseProbeGBufferArr2);
+TEXTURE2D_ARRAY(_DiffuseProbeVBufferArr0);
 
 TEXTURE2D(_BlueNoise16);
 float4 _BlueNoise16_TexelSize;
@@ -391,18 +401,6 @@ float BlueNoise1024(uint2 coord) {
     return LOAD_TEXTURE2D(_BlueNoise1024, coord & 0x3FF).r;
 }
 
-int GetDiffuseProbeGBufferSize() {
-    return _DiffuseProbeParams3.x;
-}
-
-int GetDiffuseProbeVBufferSize() {
-    return _DiffuseProbeParams3.y;
-}
-
-int GetDiffuseProbeVBufferSizeNoBorder() {
-    return _DiffuseProbeParams3.y - 2;
-}
-
 /*
 // Convert from Clip space (-1..1) to NDC 0..1 space.
 // Note it doesn't mean we don't have negative value, we store negative or positive offset in NDC space.
@@ -437,6 +435,16 @@ float2 EncodeNormalComplex(float3 N) {
 float3 DecodeNormalComplex(float2 N) {
     return UnpackNormalOctQuadEncode(N * 2.0f - 1.0f);
     // return UnpackNormalOctRectEncode(N * 2.0f - 1.0f);
+}
+
+// Convert direction from [-1, 1] to [0, 1]
+float2 DirToNormalizedOct(float3 dir) {
+    return PackNormalOctQuadEncode(dir) * .5f + .5f;
+}
+
+// Convert direction from [0, 1] to [-1, 1]
+float3 NormalizedOctToDir(float2 octCoords) {
+    return UnpackNormalOctQuadEncode(octCoords * 2.0f - 1.0f);
 }
 
 // Convert to (-1, 1)
@@ -960,12 +968,12 @@ float4 PrefilterEnvMap(TextureCube envMap, float resolution, float roughness, fl
 
 float3 SampleGlobalEnvMapDiffuse(float3 dir) {
     dir = RotateAroundYInDegrees(dir, _GlobalEnvMapRotation);
-    return _GlobalEnvMapDiffuse.SampleLevel(sampler_GlobalEnvMapDiffuse, dir, DIFF_IBL_MAX_MIP).rgb;
+    return _GlobalEnvMapDiffuse.SampleLevel(sampler_GlobalEnvMapDiffuse, dir, DIFF_IBL_MAX_MIP).rgb * _SkyboxIntensity;
 }
 
 float3 SampleGlobalEnvMapSpecular(float3 dir, float mipLevel) {
     dir = RotateAroundYInDegrees(dir, _GlobalEnvMapRotation);
-    return _GlobalEnvMapSpecular.SampleLevel(sampler_GlobalEnvMapSpecular, dir, mipLevel).rgb;
+    return _GlobalEnvMapSpecular.SampleLevel(sampler_GlobalEnvMapSpecular, dir, mipLevel).rgb * _SkyboxIntensity;
 }
 
 float ComputeHorizonSpecularOcclusion(float3 R, float3 vertexNormal, float horizonFade) {
@@ -1101,6 +1109,158 @@ float ApplyParallaxShadow(float2 uv, float3 lightDirTS, float scale, float shado
     float shadow = lerp(1.0f, .0f, shadowStrength);
 
     return stepHeight < height ? shadow : 1.0f;
+}
+
+//////////////////////////////////////////
+// Dynamic Diffuse GI                   //
+//////////////////////////////////////////
+
+bool IsDDGIEnabled() {
+    return _DiffuseProbeParams3.w == 1;
+}
+
+int GetDiffuseProbeGBufferSize() {
+    return _DiffuseProbeParams3.x;
+}
+
+int GetDiffuseProbeVBufferSize() {
+    return _DiffuseProbeParams3.y;
+}
+
+int GetDiffuseProbeVBufferSizeNoBorder() {
+    return _DiffuseProbeParams3.y - 2;
+}
+
+int GetDiffuseProbeSize() {
+    return GetDiffuseProbeGBufferSize();
+}
+
+int GetDiffuseProbeSizeNoBorder() {
+    return GetDiffuseProbeSize() - 2;
+}
+
+float3 GetDiffuseProbeDimensions() {
+    return _DiffuseProbeParams1.xyz;
+}
+
+float3 GetDiffuseProbeMaxIntervals() {
+    return _DiffuseProbeParams2.xyz;
+}
+
+float3 GetDiffuseProbeVolumeMinPos() {
+    return _DiffuseProbeParams4.xyz;
+}
+
+float3 GetDiffuseProbeVolumeMaxPos() {
+    return _DiffuseProbeParams5.xyz;
+}
+
+bool IsInsideDDGIVolume(float3 posWS, float tolerance) {
+    const float3 tolerances = float3(tolerance, tolerance, tolerance);
+    const float3 mi = GetDiffuseProbeVolumeMinPos() - tolerances;
+    const float3 ma = GetDiffuseProbeVolumeMaxPos() + tolerances;
+
+    const bool isInsideX = posWS.x >= mi.x && posWS.x <= ma.x;
+    const bool isInsideY = posWS.y >= mi.y && posWS.y <= ma.y;
+    const bool isInsideZ = posWS.z >= mi.z && posWS.z <= ma.z;
+
+    return isInsideX && isInsideY && isInsideZ;
+}
+
+bool IsInsideDDGIVolume(float3 posWS) {
+    const float3 mi = GetDiffuseProbeVolumeMinPos();
+    const float3 ma = GetDiffuseProbeVolumeMaxPos();
+
+    const bool isInsideX = posWS.x >= mi.x && posWS.x <= ma.x;
+    const bool isInsideY = posWS.y >= mi.y && posWS.y <= ma.y;
+    const bool isInsideZ = posWS.z >= mi.z && posWS.z <= ma.z;
+
+    return isInsideX && isInsideY && isInsideZ;
+}
+
+int GetProbeIndex1d(int probeX, int probeY, int probeZ) {
+    return (probeZ * _DiffuseProbeParams1.x * _DiffuseProbeParams1.y) + (probeY * _DiffuseProbeParams1.x) + probeX;
+}
+
+int GetProbeIndex1d(int3 probeIndex) {
+    return GetProbeIndex1d(probeIndex.x, probeIndex.y, probeIndex.z);
+}
+
+int3 GetProbeIndex3d(int index) {
+    int z = index / (_DiffuseProbeParams1.x * _DiffuseProbeParams1.y);
+    index -= (z * _DiffuseProbeParams1.x * _DiffuseProbeParams1.y);
+    int y = index / _DiffuseProbeParams1.x;
+    int x = index % _DiffuseProbeParams1.x;
+    return int3(x, y, z);
+}
+
+float3 GetDiffuseProbePosWS(int probeX, int probeY, int probeZ) {
+    return GetDiffuseProbeVolumeMinPos() + float3(probeX, probeY, probeZ) * GetDiffuseProbeMaxIntervals();
+}
+
+float3 GetDiffuseProbePosWS(int3 probeIndex) {
+    return GetDiffuseProbePosWS(probeIndex.x, probeIndex.y, probeIndex.z);
+}
+
+float3 GetDiffuseProbePosWS(int probeIndex) {
+    return GetDiffuseProbePosWS(GetProbeIndex3d(probeIndex));
+}
+
+// will clamp to the nearest probe if outside the volume
+int3 GetNearestProbeIndex3dFromPosWS(float3 posWS) {
+    float3 extents = posWS - GetDiffuseProbeVolumeMinPos();
+    float3 maxIntervals = GetDiffuseProbeMaxIntervals();
+    float3 counts = extents / maxIntervals;
+    counts = clamp(counts, float3(.0f, .0f, .0f), GetDiffuseProbeDimensions() - float3(1.0f, 1.0f, 1.0f));
+    int3 index3d = round(counts);
+    return index3d;
+}
+
+// will clamp to the nearest probe if outside the volume
+int GetNearestProbeIndex1dFromPosWS(float3 posWS) {
+    return GetProbeIndex1d(GetNearestProbeIndex3dFromPosWS(posWS));
+}
+
+float GetMaxVisibilityDepth() {
+    return _DiffuseProbeParams2.w * 1.5f;
+}
+
+// assume 1-px wide border on all 4 sides
+float2 GetUVWithBorder(float2 uvNoBorder, float size, float sizeNoBorder) {
+    float scaling = sizeNoBorder / size;
+    float offset = 1.0f / size;
+    float2 finalUV = uvNoBorder * scaling + offset;
+    return finalUV;
+}
+
+float2 GetUVWithBorder(float3 dir, float size, float sizeNoBorder) {
+    return GetUVWithBorder(DirToNormalizedOct(dir), size, sizeNoBorder);
+}
+
+float2 GetIrradianceMapUV(float3 dir) {
+    return GetUVWithBorder(dir, float(GetDiffuseProbeSize()), float(GetDiffuseProbeSizeNoBorder()));
+}
+
+float2 GetVisibilityMapUV(float3 dir) {
+    return GetUVWithBorder(dir, float(GetDiffuseProbeVBufferSize()), float(GetDiffuseProbeVBufferSizeNoBorder()));
+}
+
+float3 SampleIndirectDiffuseGI(float3 posWS, float3 N, float3 diffuse, float3 kD, float envD) {
+    float3 indirectDiffuse = float3(.0f, .0f, .0f);
+
+    // todo
+    // sample the nearest 8 diffuse probes and weight them accordingly
+
+    // foreach probe in 8 diffuse probes
+    // - trilinear weighting based on PosWS
+    // - cosine weighting between the surface normal and the direction from the sample to the probe
+    // - visibility weighting
+    // - apply weight bias to avoid div by 0
+    // normalize the weight
+
+    indirectDiffuse *= diffuse * kD * envD * INV_PI;
+    
+    return indirectDiffuse;
 }
 
 #endif

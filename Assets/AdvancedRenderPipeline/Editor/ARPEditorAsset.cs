@@ -29,5 +29,32 @@ namespace AdvancedRenderPipeline.Editor {
 			Debug.Log("Copy Texture Support: " + SystemInfo.copyTextureSupport);
 			Debug.Log("Supports Vibration: " + SystemInfo.supportsVibration);
 		}
+
+		public static bool AssetExistsAt(string path) {
+			var guid = AssetDatabase.AssetPathToGUID(path);
+			return !string.IsNullOrEmpty(guid);
+		}
+
+		public static void CreateOrOverrideAssetAt(Object asset, string path) {
+			/*
+			if (AssetExistsAt(path)) {
+				Debug.Log(path + " Exists!");
+				AssetDatabase.DeleteAsset(path);
+			}
+			*/
+            
+			AssetDatabase.DeleteAsset(path);
+			AssetDatabase.CreateAsset(asset, path);
+		}
+
+		public static void CreateAssetAt(Object asset, string path, bool overrideExistingAsset = false) {
+			if (overrideExistingAsset) {
+				CreateOrOverrideAssetAt(asset, path);
+				return;
+			}
+
+			path = AssetDatabase.GenerateUniqueAssetPath(path);
+			AssetDatabase.CreateAsset(asset, path);
+		}
 	}
 }

@@ -7,30 +7,12 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
     public unsafe class DiffuseProbeCameraRenderer : CameraRenderer {
 
         public static readonly Vector3[] CubemapEulerAngles = {
-            new(0.0f,-90.0f,180.0f), // +X
-            new(0.0f,90.0f,-180.0f), // -X
-            new(-90.0f,0.0f,180.0f), // +Y
-            new(90.0f,0.0f,-180.0f), // -Y
-            new(0.0f,0.0f,180.0f), // +Z
-            new(0.0f,180.0f,-180.0f) // -Z
-        };
-
-        public static readonly Vector3[] LookAtDirections = {
-	        Vector3.right,
-	        Vector3.left,
-	        Vector3.up,
-	        Vector3.down,
-	        Vector3.forward,
-	        Vector3.back
-        };
-        
-        public static readonly Vector3[] UpDirections = {
-	        Vector3.up,
-	        Vector3.up,
-	        Vector3.forward,
-	        Vector3.back,
-	        Vector3.up,
-	        Vector3.down
+	        new(0.0f,90.0f,180.0f), // +X
+	        new(0.0f,-90.0f,-180.0f), // -X
+            new(-90.0f,0.0f,-180.0f), // +Y
+            new(90.0f,0.0f,180.0f), // -Y
+            new(0.0f,0.0f,-180.0f), // +Z
+            new(0.0f,180.0f,180.0f) // -Z
         };
 
         protected string _rendererDesc;
@@ -133,11 +115,19 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
             };
             
             var viewMatrix = camera.worldToCameraMatrix;
-			_matrixVP = GL.GetGPUProjectionMatrix(camera.projectionMatrix, false) * viewMatrix;
+            
+            camera.ResetProjectionMatrix();
+            var projectionMatrix = camera.projectionMatrix;
+            projectionMatrix *= Matrix4x4.Scale(new Vector3(-1f, 1f, 1f));
+            camera.projectionMatrix = projectionMatrix;
+			_matrixVP = GL.GetGPUProjectionMatrix(projectionMatrix, false) * viewMatrix;
 			_invMatrixVP = _matrixVP.inverse;
-			_nonjitteredMatrixVP = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, false) * viewMatrix;
-			_invNonJitteredMatrixVP = _nonjitteredMatrixVP.inverse;
+			
+			// _nonjitteredMatrixVP = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, false) * viewMatrix;
+			_nonjitteredMatrixVP = _matrixVP;
+			_invNonJitteredMatrixVP = _invMatrixVP;
 
+			_cmd.SetInvertCulling(true);
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_MATRIX_I_VP, _invMatrixVP);
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_PREV_MATRIX_VP, IsOnFirstFrame ? _nonjitteredMatrixVP : _prevMatrixVP);
 			_cmd.SetGlobalMatrix(ShaderKeywordManager.UNITY_PREV_MATRIX_I_VP, IsOnFirstFrame ? _invNonJitteredMatrixVP : _prevInvMatrixVP);
@@ -208,6 +198,8 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 	        var filterSettings = new FilteringSettings(RenderQueueRange.opaque);
 
 	        _context.DrawRenderers(_cullingResults, ref drawSettings, ref filterSettings);
+	        
+	        _context.DrawSkybox(camera);
         }
 
         public void FinalBlit() {
@@ -257,6 +249,7 @@ namespace AdvancedRenderPipeline.Runtime.Cameras {
 	        
 	        _cmd.DispatchCompute(cs, kernel, threadGroupsX, threadGroupsY, threadGroupsZ);
 
+	        _cmd.SetInvertCulling(false);
 	        ExecuteCommand();
         }
         
