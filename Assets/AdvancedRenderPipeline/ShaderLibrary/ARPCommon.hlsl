@@ -1245,49 +1245,50 @@ float2 GetVisibilityMapUV(float3 dir) {
     return GetUVWithBorder(dir, float(GetDiffuseProbeVBufferSize()), float(GetDiffuseProbeVBufferSizeNoBorder()));
 }
 
-float4 GetProbeIrradianceWeighted(int3 probeIndex, float3 posWS, float3 N) {
-    // Weights for each factor
-    const float trilinearWeightFactor = 1.0f;
-    const float sharpnessFactor = 1.0f;
-    
-    // Find probe world-space position
-    float3 probePos = GetDiffuseProbePosWS(probeIndex);
-
-    // Start weight at 1.0 (weight bias)
-    float netWeight = 1.0f;
-
-    // Trilinear weighting: smaller value (dist to probe) -> higher weight
-    float3 pointToProbe = normalize(probePos - posWS);
-    float distToProbe = length(pointToProbe);
-    // DiffuseProbeParams2.w is maximum diagonal length
-    float distWeight = (_DiffuseProbeParams2.w - distToProbe) / _DiffuseProbeParams2.w;
-    netWeight *= distWeight;
-
-    // Cosine weighting: smaller value (angle between N and point-to-probe) -> higher weight
-    // cos(theta) = (a dot b) / (|a| * |b|); pointToProbe and N are both normalized, so |a| == |b| == 1
-    // Assuming that N is in world-space coords here
-    float cos_theta = abs(dot(N, pointToProbe));
-    // Apply power weighting using the sharpness factor specified above
-    netWeight *= 1 / cos_theta;
-
-    // Visibility weighting: larger value -> higher weight
-    // Sky visibility stored in .a channel of GBuffer0
-    // Do we need to use GetMaxVisibilityDepth() here?
-    float2 visibilityUV = GetVisibilityMapUV(N);
-    float visibility = SAMPLE_TEXTURE2D_ARRAY_LOD(_DiffuseProbeGBufferArr0, sampler_linear_clamp, visibilityUV, GetProbeIndex1d(probeIndex), 0);
-    // Assuming that visibility is a value <= 1.0
-    netWeight *= visibility;
-    
-    // Sample the texture given normal vector N
-    float2 probeTexUV = GetIrradianceMapUV(N);
-    float3 probeIrradiance = SAMPLE_TEXTURE2D_ARRAY_LOD(_DiffuseProbeIrradianceArr, sampler_linear_clamp, probeTexUV, GetProbeIndex1d(probeIndex), 0);
-
-    // Weight the resulting irradiance, return irradiance and weight in float4
-    return float4(probeIrradiance * netWeight, netWeight);
-}
+// Initial attempt; if there's nothing useful here, feel free to delete
+// float4 GetProbeIrradianceWeighted2(int3 probeIndex, float3 posWS, float3 N) {
+//     // Weights for each factor
+//     const float trilinearWeightFactor = 1.0f;
+//     const float sharpnessFactor = 1.0f;
+//     
+//     // Find probe world-space position
+//     float3 probePos = GetDiffuseProbePosWS(probeIndex);
+//
+//     // Start weight at 1.0 (weight bias)
+//     float netWeight = 1.0f;
+//
+//     // Trilinear weighting: smaller value (dist to probe) -> higher weight
+//     float3 pointToProbe = normalize(probePos - posWS);
+//     float distToProbe = length(pointToProbe);
+//     // DiffuseProbeParams2.w is maximum diagonal length
+//     float distWeight = (_DiffuseProbeParams2.w - distToProbe) / _DiffuseProbeParams2.w;
+//     netWeight *= distWeight;
+//
+//     // Cosine weighting: smaller value (angle between N and point-to-probe) -> higher weight
+//     // cos(theta) = (a dot b) / (|a| * |b|); pointToProbe and N are both normalized, so |a| == |b| == 1
+//     // Assuming that N is in world-space coords here
+//     float cos_theta = abs(dot(N, pointToProbe));
+//     // Apply power weighting using the sharpness factor specified above
+//     netWeight *= 1 / cos_theta;
+//
+//     // Visibility weighting: larger value -> higher weight
+//     // Sky visibility stored in .a channel of GBuffer0
+//     // Do we need to use GetMaxVisibilityDepth() here?
+//     float2 visibilityUV = GetVisibilityMapUV(N);
+//     float visibility = SAMPLE_TEXTURE2D_ARRAY_LOD(_DiffuseProbeGBufferArr0, sampler_linear_clamp, visibilityUV, GetProbeIndex1d(probeIndex), 0);
+//     // Assuming that visibility is a value <= 1.0
+//     netWeight *= visibility;
+//     
+//     // Sample the texture given normal vector N
+//     float2 probeTexUV = GetIrradianceMapUV(N);
+//     float3 probeIrradiance = SAMPLE_TEXTURE2D_ARRAY_LOD(_DiffuseProbeIrradianceArr, sampler_linear_clamp, probeTexUV, GetProbeIndex1d(probeIndex), 0);
+//
+//     // Weight the resulting irradiance, return irradiance and weight in float4
+//     return float4(probeIrradiance * netWeight, netWeight);
+// }
 
 /* Using the power cosine weighting expression William posted in the Discord */
-float4 GetProbeIrradianceWeighted2(int3 probeIndex, float3 posWS, float3 N) {
+float4 GetProbeIrradianceWeighted(int3 probeIndex, float3 posWS, float3 N) {
     // Weights for each factor
     const float trilinearWeightFactor = 1.0f;
     const float visibilityWeightFactor = 1.0f;
@@ -1320,7 +1321,7 @@ float4 GetProbeIrradianceWeighted2(int3 probeIndex, float3 posWS, float3 N) {
     // Apply power weighting using the sharpness factor specified above
     float cos_weight = pow(cos_theta, sharpnessFactor);
 
-    // Final weight calculated as follows:
+    // Final weight calculated as follows (using expression William posted in our group chat):
     netWeight = cos_weight / netWeight;
     
     // Sample the texture given normal vector N
